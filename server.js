@@ -1,26 +1,28 @@
 const express = require('express');
 const path = require('path');
-const Joi = require('joi'); // Import Joi for validation
+const Joi = require('joi'); // For validation
+const cors = require('cors'); // Enable cross-origin requests
 const app = express();
 
-// Middleware to parse JSON request bodies
-app.use(express.json());
-
-// Enable CORS if needed (if your client is on another domain)
-const cors = require('cors');
+// Enable CORS for all routes
 app.use(cors());
 
-// Use the port provided by the environment or default to 3001
+// Middleware to parse JSON bodies
+app.use(express.json());
+
+// Use the port provided by the environment (e.g., Render) or default to 3001
 const PORT = process.env.PORT || 3001;
 
+// Load games data from a JSON file located in the "data" folder
 let games = require(path.join(__dirname, 'data', 'games.json'));
 
-// Schema for validating a new game object
+// Joi schema for validating a game object, including the "sport" field
 const gameSchema = Joi.object({
+  sport: Joi.string().required(),
   img_name: Joi.string().required(),
   teamA: Joi.string().required(),
   teamB: Joi.string().required(),
-  date: Joi.string().required(),         // You could use Joi.date() if you prefer
+  date: Joi.string().required(),         // Or Joi.date() if preferred
   location: Joi.string().required(),
   score: Joi.string().required(),
   game_summary: Joi.string().required(),
@@ -28,7 +30,7 @@ const gameSchema = Joi.object({
   match_stats: Joi.object().required()
 });
 
-// Serve static files from the 'public' folder
+// Serve static files from the 'public' folder (for index.html, CSS, etc.)
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Serve images from the 'images' folder
@@ -50,26 +52,24 @@ app.get('/api/games/:id', (req, res) => {
   }
 });
 
-// POST endpoint: add a new game
+// POST endpoint: add a new game after validating with Joi
 app.post('/api/games', (req, res) => {
   const { error, value } = gameSchema.validate(req.body);
   if (error) {
-    // If validation fails, return error details
     return res.status(400).json({ error: error.details[0].message });
   }
-
-  // Generate a new _id (for simplicity, use max id + 1)
+  
+  // Generate a new _id (max existing _id + 1, or 1 if empty)
   const newId = games.length > 0 ? Math.max(...games.map(g => g._id)) + 1 : 1;
   const newGame = { _id: newId, ...value };
-  
-  // Add the new game to the array (in memory)
+
+  // Add the new game to the array
   games.push(newGame);
 
-  // Return the newly added game with success status
   res.status(201).json({ message: 'Game added successfully', game: newGame });
 });
 
-// Serve the index.html for the root URL
+// Serve index.html for the root URL
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
