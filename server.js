@@ -1,29 +1,45 @@
 const express = require('express');
-const cors = require('cors');         // Import the cors package
 const path = require('path');
+const Joi = require('joi'); // Import Joi for validation
 const app = express();
 
-// Enable CORS for all routes
+// Middleware to parse JSON request bodies
+app.use(express.json());
+
+// Enable CORS if needed (if your client is on another domain)
+const cors = require('cors');
 app.use(cors());
 
-// Use the port provided by the environment (e.g., Render) or default to 3001
+// Use the port provided by the environment or default to 3001
 const PORT = process.env.PORT || 3001;
 
-// Load games data from a JSON file located in the "data" folder
-const games = require(path.join(__dirname, 'data', 'games.json'));
+let games = require(path.join(__dirname, 'data', 'games.json'));
 
-// Serve static files from the 'public' folder (for index.html, CSS, etc.)
+// Schema for validating a new game object
+const gameSchema = Joi.object({
+  img_name: Joi.string().required(),
+  teamA: Joi.string().required(),
+  teamB: Joi.string().required(),
+  date: Joi.string().required(),         // You could use Joi.date() if you prefer
+  location: Joi.string().required(),
+  score: Joi.string().required(),
+  game_summary: Joi.string().required(),
+  play_by_play: Joi.string().required(),
+  match_stats: Joi.object().required()
+});
+
+// Serve static files from the 'public' folder
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Serve images from the 'images' folder
 app.use('/images', express.static(path.join(__dirname, 'images')));
 
-// API endpoint to get all games
+// GET endpoint: return all games
 app.get('/api/games', (req, res) => {
   res.json(games);
 });
 
-// API endpoint to get a single game by id
+// GET endpoint: return a single game by id
 app.get('/api/games/:id', (req, res) => {
   const gameId = Number(req.params.id);
   const game = games.find(g => g._id === gameId);
@@ -32,6 +48,25 @@ app.get('/api/games/:id', (req, res) => {
   } else {
     res.status(404).json({ error: 'Game not found' });
   }
+});
+
+// POST endpoint: add a new game
+app.post('/api/games', (req, res) => {
+  const { error, value } = gameSchema.validate(req.body);
+  if (error) {
+    // If validation fails, return error details
+    return res.status(400).json({ error: error.details[0].message });
+  }
+
+  // Generate a new _id (for simplicity, use max id + 1)
+  const newId = games.length > 0 ? Math.max(...games.map(g => g._id)) + 1 : 1;
+  const newGame = { _id: newId, ...value };
+  
+  // Add the new game to the array (in memory)
+  games.push(newGame);
+
+  // Return the newly added game with success status
+  res.status(201).json({ message: 'Game added successfully', game: newGame });
 });
 
 // Serve the index.html for the root URL
