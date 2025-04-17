@@ -1,4 +1,3 @@
-// server.js
 const express = require('express');
 const path = require('path');
 const Joi = require('joi');
@@ -11,7 +10,7 @@ app.use(express.json());
 const PORT = process.env.PORT || 3001;
 let games = require(path.join(__dirname, 'data', 'games.json'));
 
-// Schema for creating a new game (sport required)
+// Schema for creating a new game (both sport & img_name required)
 const createGameSchema = Joi.object({
   sport: Joi.string().required(),
   img_name: Joi.string().required(),
@@ -25,10 +24,10 @@ const createGameSchema = Joi.object({
   match_stats: Joi.object().required()
 });
 
-// Schema for updating an existing game (sport optional)
+// Schema for updating an existing game (sport & img_name optional)
 const updateGameSchema = Joi.object({
   sport: Joi.string().optional(),
-  img_name: Joi.string().required(),
+  img_name: Joi.string().optional(),
   teamA: Joi.string().required(),
   teamB: Joi.string().required(),
   date: Joi.string().required(),
@@ -39,7 +38,6 @@ const updateGameSchema = Joi.object({
   match_stats: Joi.object().required()
 });
 
-// Serve static and images
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/images', express.static(path.join(__dirname, 'images')));
 
@@ -48,7 +46,7 @@ app.get('/api/games', (req, res) => {
   res.json(games);
 });
 
-// GET single game
+// GET one game
 app.get('/api/games/:id', (req, res) => {
   const id = Number(req.params.id);
   const game = games.find(g => g._id === id);
@@ -67,7 +65,7 @@ app.post('/api/games', (req, res) => {
   res.status(201).json({ message: 'Game added', game: newGame });
 });
 
-// PUT update existing game
+// PUT update game
 app.put('/api/games/:id', (req, res) => {
   const id = Number(req.params.id);
   const idx = games.findIndex(g => g._id === id);
@@ -76,19 +74,26 @@ app.put('/api/games/:id', (req, res) => {
   const { error, value } = updateGameSchema.validate(req.body);
   if (error) return res.status(400).json({ error: error.details[0].message });
 
-  // Merge existing _id and sport if none provided
   const existing = games[idx];
   const updated = {
     _id: id,
-    sport: value.sport || existing.sport,
-    ...value
+    sport: value.sport ?? existing.sport,
+    img_name: value.img_name ?? existing.img_name,
+    teamA: value.teamA,
+    teamB: value.teamB,
+    date: value.date,
+    location: value.location,
+    score: value.score,
+    game_summary: value.game_summary,
+    play_by_play: value.play_by_play,
+    match_stats: value.match_stats
   };
 
   games[idx] = updated;
   res.json({ message: 'Game updated', game: updated });
 });
 
-// DELETE a game
+// DELETE game
 app.delete('/api/games/:id', (req, res) => {
   const id = Number(req.params.id);
   const idx = games.findIndex(g => g._id === id);
@@ -98,7 +103,7 @@ app.delete('/api/games/:id', (req, res) => {
   res.json({ message: 'Game deleted' });
 });
 
-// Fallback to index.html
+// Serve index.html
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
