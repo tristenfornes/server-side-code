@@ -146,10 +146,11 @@ app.delete('/api/games/:id', async (req, res) => {
 });
 
 //–– Catch-all to serve your React app ––
-// Changed from '*' to '/*' to avoid path-to-regexp error
-app.get('/*', (req, res) => {
+// use a RegExp fallback instead of a string
+app.get(/.*/, (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
+
 
 //–– Start server ––
 const port = process.env.PORT || 3001;
