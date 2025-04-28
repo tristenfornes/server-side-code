@@ -1,113 +1,169 @@
-const express = require('express');
-const path = require('path');
-const Joi = require('joi');
-const cors = require('cors');
-const app = express();
+// server.js
+require('dotenv').config();
+const express   = require('express');
+const mongoose  = require('mongoose');
+const path      = require('path');
+const cors      = require('cors');
+const multer    = require('multer');
+const Joi       = require('joi');
 
+const app = express();
 app.use(cors());
 app.use(express.json());
 
-const PORT = process.env.PORT || 3001;
-let games = require(path.join(__dirname, 'data', 'games.json'));
+mongoose.connect(process.env.MONGODB_URI, {
+  useNewUrlParser:    true,
+  useUnifiedTopology: true
+})
+.then(() => console.log('✅ MongoDB connected'))
+.catch(err => console.error('❌ MongoDB connection error:', err));
 
-// Schema for creating a new game (both sport & img_name required)
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, path.join(__dirname, 'images'));
+  },
+  filename: (req, file, cb) => {
+    const uniqueName = Date.now() + path.extname(file.originalname);
+    cb(null, uniqueName);
+  }
+});
+const upload = multer({ storage });
+
+const gameSchema = new mongoose.Schema({
+  sport:        { type: String, required: true },
+  img_name:     { type: String, required: true },
+  teamA:        { type: String, required: true },
+  teamB:        { type: String, required: true },
+  date:         { type: Date,   required: true },
+  location:     { type: String, required: true },
+  score:        { type: String, required: true },
+  game_summary:{ type: String, required: true },
+  play_by_play:{ type: String, required: true },
+  match_stats: { type: Map, of: String, required: true }
+}, { timestamps: true });
+
+const Game = mongoose.model('Game', gameSchema);
+
 const createGameSchema = Joi.object({
-  sport: Joi.string().required(),
-  img_name: Joi.string().required(),
-  teamA: Joi.string().required(),
-  teamB: Joi.string().required(),
-  date: Joi.string().required(),
-  location: Joi.string().required(),
-  score: Joi.string().required(),
-  game_summary: Joi.string().required(),
-  play_by_play: Joi.string().required(),
-  match_stats: Joi.object().required()
+  sport:        Joi.string().required(),
+  // img_name will be added after upload
+  teamA:        Joi.string().required(),
+  teamB:        Joi.string().required(),
+  date:         Joi.date().required(),
+  location:     Joi.string().required(),
+  score:        Joi.string().required(),
+  game_summary:Joi.string().required(),
+  play_by_play:Joi.string().required(),
+  match_stats: Joi.object().pattern(/.*/, Joi.string()).required()
 });
 
-// Schema for updating an existing game (sport & img_name optional)
 const updateGameSchema = Joi.object({
-  sport: Joi.string().optional(),
-  img_name: Joi.string().optional(),
-  teamA: Joi.string().required(),
-  teamB: Joi.string().required(),
-  date: Joi.string().required(),
-  location: Joi.string().required(),
-  score: Joi.string().required(),
-  game_summary: Joi.string().required(),
-  play_by_play: Joi.string().required(),
-  match_stats: Joi.object().required()
+  sport:        Joi.string().optional(),
+  // img_name optional on update
+  teamA:        Joi.string().required(),
+  teamB:        Joi.string().required(),
+  date:         Joi.date().required(),
+  location:     Joi.string().required(),
+  score:        Joi.string().required(),
+  game_summary:Joi.string().required(),
+  play_by_play:Joi.string().required(),
+  match_stats: Joi.object().pattern(/.*/, Joi.string()).required()
 });
 
-app.use(express.static(path.join(__dirname, 'public')));
 app.use('/images', express.static(path.join(__dirname, 'images')));
+app.use(express.static(path.join(__dirname, 'public')));
 
 // GET all games
-app.get('/api/games', (req, res) => {
+app.get('/api/games', async (req, res) => {
+  const games = await Game.find().sort('-date');
   res.json(games);
 });
 
-// GET one game
-app.get('/api/games/:id', (req, res) => {
-  const id = Number(req.params.id);
-  const game = games.find(g => g._id === id);
-  if (!game) return res.status(404).json({ error: 'Game not found' });
-  res.json(game);
+// GET one game by ID
+app.get('/api/games/:id', async (req, res) => {
+  try {
+    const game = await Game.findById(req.params.id);
+    if (!game) return res.status(404).json({ error: 'Game not found' });
+    res.json(game);
+  } catch {
+    res.status(400).json({ error: 'Invalid ID' });
+  }
 });
 
-// POST new game
-app.post('/api/games', (req, res) => {
-  const { error, value } = createGameSchema.validate(req.body);
-  if (error) return res.status(400).json({ error: error.details[0].message });
+// POST new game (with image upload)
+app.post(
+  '/api/games',
+  upload.single('image'),
+  async (req, res) => {
+    // Build payload
+    const payload = {
+      ...req.body,
+      img_name: req.file ? req.file.filename : null,
+      match_stats: JSON.parse(req.body.match_stats)
+    };
 
-  const newId = games.length ? Math.max(...games.map(g => g._id)) + 1 : 1;
-  const newGame = { _id: newId, ...value };
-  games.push(newGame);
-  res.status(201).json({ message: 'Game added', game: newGame });
+    // Validate
+    const { error, value } = createGameSchema.validate(payload);
+    if (error) {
+      return res.status(400).json({ error: error.details[0].message });
+    }
+
+    // Save
+    const game = new Game(value);
+    await game.save();
+    res.status(201).json({ message: 'Game added', game });
+  }
+);
+
+// PUT update existing game (optional image)
+app.put(
+  '/api/games/:id',
+  upload.single('image'),
+  async (req, res) => {
+    try {
+      // Parse stats
+      const stats = JSON.parse(req.body.match_stats);
+      // Prepare payload
+      const payload = { ...req.body, match_stats: stats };
+      if (req.file) payload.img_name = req.file.filename;
+
+      // Validate
+      const { error, value } = updateGameSchema.validate(payload);
+      if (error) {
+        return res.status(400).json({ error: error.details[0].message });
+      }
+
+      // Update
+      const game = await Game.findByIdAndUpdate(
+        req.params.id,
+        value,
+        { new: true }
+      );
+      if (!game) return res.status(404).json({ error: 'Game not found' });
+
+      res.json({ message: 'Game updated', game });
+    } catch (err) {
+      return res.status(400).json({ error: 'Invalid data or ID' });
+    }
+  }
+);
+
+// DELETE a game
+app.delete('/api/games/:id', async (req, res) => {
+  try {
+    const game = await Game.findByIdAndDelete(req.params.id);
+    if (!game) return res.status(404).json({ error: 'Game not found' });
+    res.json({ message: 'Game deleted' });
+  } catch {
+    res.status(400).json({ error: 'Invalid ID' });
+  }
 });
 
-// PUT update game
-app.put('/api/games/:id', (req, res) => {
-  const id = Number(req.params.id);
-  const idx = games.findIndex(g => g._id === id);
-  if (idx === -1) return res.status(404).json({ error: 'Game not found' });
-
-  const { error, value } = updateGameSchema.validate(req.body);
-  if (error) return res.status(400).json({ error: error.details[0].message });
-
-  const existing = games[idx];
-  const updated = {
-    _id: id,
-    sport: value.sport ?? existing.sport,
-    img_name: value.img_name ?? existing.img_name,
-    teamA: value.teamA,
-    teamB: value.teamB,
-    date: value.date,
-    location: value.location,
-    score: value.score,
-    game_summary: value.game_summary,
-    play_by_play: value.play_by_play,
-    match_stats: value.match_stats
-  };
-
-  games[idx] = updated;
-  res.json({ message: 'Game updated', game: updated });
-});
-
-// DELETE game
-app.delete('/api/games/:id', (req, res) => {
-  const id = Number(req.params.id);
-  const idx = games.findIndex(g => g._id === id);
-  if (idx === -1) return res.status(404).json({ error: 'Game not found' });
-
-  games.splice(idx, 1);
-  res.json({ message: 'Game deleted' });
-});
-
-// Serve index.html
-app.get('/', (req, res) => {
+app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-app.listen(PORT, () => {
-  console.log(`Server listening on port ${PORT}`);
+const port = process.env.PORT || 3001;
+app.listen(port, () => {
+  console.log(`Server listening on port ${port}`);
 });
